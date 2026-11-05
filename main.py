@@ -9,8 +9,11 @@ Estructura de carpetas:
     canciones/
         ameba/
             info.json            (titulo, artista, bpm, offset, velocidad)
-            Soda Stereo - Ameba.mp3   (cualquier .mp3/.ogg/.wav)
+            Soda Stereo - Ameba.mp3   (cualquier .mp3/.ogg/.wav/.opus)
             chart.txt            (se crea solo si no existe)
+
+Ademas, si una carpeta viene de Clone Hero (notes.chart o notes.mid + song.ini), el
+juego solo la convierte y arma el info.json al arrancar.
 
 Menu:    flechas arriba/abajo o carril 1/2  |  Enter o carril 3 = jugar
          R o carril 5 = grabar chart de la cancion elegida  |  E = editor de charts (editor.py)
@@ -21,9 +24,12 @@ Teclado si no hay Arduino: A S D F G
 import json
 import os
 import random
+import re
 import time
 
 import pygame
+
+from convertir_chart import convertir, leer_chart, leer_mid
 
 try:
     import serial
@@ -79,11 +85,93 @@ class Ctx:
 
 
 # ---------- Datos de canciones ----------
+AUDIOS = (".mp3", ".ogg", ".wav", ".opus")
+
+
+def mezclar_stems(ruta, archivos):
+    """Mezcla varias pistas (guitar, bass, drums...) en un mezcla.wav y devuelve su ruta."""
+    import wave
+    import numpy as np
+    destino = os.path.join(ruta, "mezcla.wav")
+    mezcla = None
+    for nombre in archivos:
+        datos = np.frombuffer(pygame.mixer.Sound(os.path.join(ruta, nombre)).get_raw(), dtype=np.int16).astype(np.int32)
+        if mezcla is None:
+            mezcla = datos
+        else:
+            largo = max(len(mezcla), len(datos))
+            mezcla = np.pad(mezcla, (0, largo - len(mezcla)))
+            mezcla += np.pad(datos, (0, largo - len(datos)))
+    mezcla = np.clip(mezcla, -32768, 32767).astype(np.int16)
+    freq, _, canales = pygame.mixer.get_init()
+    with wave.open(destino, "wb") as w:
+        w.setnchannels(canales)
+        w.setsampwidth(2)
+        w.setframerate(freq)
+        w.writeframes(mezcla.tobytes())
+    print(f"Mezcla de {len(archivos)} pistas creada: {destino}")
+    return destino
+
+
 def buscar_audio(ruta):
-    for nombre in sorted(os.listdir(ruta)):
-        if nombre.lower().endswith((".mp3", ".ogg", ".wav")):
-            return os.path.join(ruta, nombre)
-    return None
+    archivos = [n for n in sorted(os.listdir(ruta)) if n.lower().endswith(AUDIOS)]
+    if "mezcla.wav" in archivos:
+        return os.path.join(ruta, "mezcla.wav")
+    if len(archivos) > 1:
+        completo = [n for n in archivos if n.lower().startswith("song.")]
+        if completo:
+            return os.path.join(ruta, completo[0])
+        try:
+            return mezclar_stems(ruta, archivos)
+        except Exception as e:
+            print(f"[aviso] No pude mezclar las pistas de {ruta}: {e}")
+    return os.path.join(ruta, archivos[0]) if archivos else None
+
+
+def bpm_de_chart(ruta):
+    """Primer BPM de un notes.chart / notes.mid de Clone Hero."""
+    try:
+        leer = leer_mid if ruta.lower().endswith(".mid") else leer_chart
+        return round(leer(ruta, "Expert", "Single")[1][0][1], 3)
+    except (SystemExit, IndexError, ValueError):
+        return 100
+
+
+def preparar_carpeta(ruta):
+    """Si la carpeta viene de Clone Hero (notes.chart o notes.mid, song.ini), la deja lista
+    para jugar: convierte el chart y arma un info.json si no hay."""
+    ruta_info = os.path.join(ruta, "info.json")
+    ruta_chart = os.path.join(ruta, "chart.txt")
+    notes = next((os.path.join(ruta, n) for n in ("notes.chart", "notes.mid")
+                  if os.path.isfile(os.path.join(ruta, n))), None)
+    if not notes:
+        return
+
+    if not os.path.isfile(ruta_chart):
+        try:
+            salida, n = convertir(notes)
+            print(f"Chart de Clone Hero convertido: {salida} ({n} notas)")
+        except SystemExit as e:
+            print(f"[aviso] No pude convertir {notes}: {e}")
+
+    if not os.path.isfile(ruta_info):
+        info = {"titulo": os.path.basename(ruta), "artista": "", "bpm": bpm_de_chart(notes)}
+        ini = os.path.join(ruta, "song.ini")
+        if os.path.isfile(ini):
+            try:
+                import configparser
+                cfg = configparser.ConfigParser()
+                cfg.read(ini, encoding="utf-8")
+                if cfg.has_section("song"):
+                    info["titulo"] = cfg.get("song", "name", fallback=info["titulo"])
+                    info["artista"] = cfg.get("song", "artist", fallback="")
+                    delay = float(cfg.get("song", "delay", fallback=0))
+                    info["offset"] = round(delay / 1000, 3)
+            except (configparser.Error, ValueError):
+                pass
+        with open(ruta_info, "w", encoding="utf-8") as f:
+            json.dump(info, f, indent=2, ensure_ascii=False)
+        print(f"info.json creado para: {info['titulo']}")
 
 
 def cargar_canciones():
@@ -92,6 +180,9 @@ def cargar_canciones():
         return canciones
     for carpeta in sorted(os.listdir(CARPETA_CANCIONES)):
         ruta = os.path.join(CARPETA_CANCIONES, carpeta)
+        if not os.path.isdir(ruta):
+            continue
+        preparar_carpeta(ruta)
         ruta_info = os.path.join(ruta, "info.json")
         if not os.path.isfile(ruta_info):
             continue
