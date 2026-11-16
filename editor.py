@@ -9,7 +9,7 @@ Controles:
     Flecha arriba/abajo o rueda del mouse : mover el cursor (segun la precision)
     Re Pag / Av Pag                       : mover 4 beats
     Inicio                                : ir al principio
-    A S D F G (o botones Arduino) / clic  : poner o quitar una nota
+    A S D F (o botones Arduino) / clic  : poner o quitar una nota
     Arrastrar con el mouse hacia arriba   : nota LARGA (formato chart: "beat carril duracion")
     Supr                                  : borrar todas las notas del beat actual
     1 2 3 4                               : precision 1, 1/2, 1/4, 1/8 de beat
@@ -28,12 +28,12 @@ from array import array
 
 import pygame
 
-CARRILES = 5
+from config import CARRILES, COLORES
+
 ANCHO, ALTO = 600, 800
 HEADER = 90
 Y_CURSOR = ALTO - 170
 Y_FIN = Y_CURSOR + 50
-COLORES = [(0, 200, 0), (220, 0, 0), (240, 220, 0), (0, 120, 255), (255, 140, 0)]
 
 
 def leer_chart(ruta):
@@ -46,7 +46,10 @@ def leer_chart(ruta):
                     continue
                 partes = linea.split()
                 dur = round(float(partes[2]), 4) if len(partes) > 2 else 0.0
-                notas.add((round(float(partes[0]), 4), int(partes[1]), dur))
+                carril = min(int(partes[1]), CARRILES - 1)   # carriles que ya no existen -> el ultimo
+                beat = round(float(partes[0]), 4)
+                if not any(n[0] == beat and n[1] == carril for n in notas):
+                    notas.add((beat, carril, dur))
     return notas
 
 
@@ -208,7 +211,8 @@ class Editor:
     def guardar(self):
         chart = self.c["chart"]
         if not self.respaldo_hecho and os.path.exists(chart):
-            os.replace(chart, chart.replace("chart.txt", "chart_anterior.txt"))
+            base, ext = os.path.splitext(chart)
+            os.replace(chart, f"{base}_anterior{ext}")
         self.respaldo_hecho = True
         with open(chart, "w") as f:
             f.write(f"# BPM {self.c['bpm']:g}, offset {self.c['offset']:.2f}\n")
@@ -286,7 +290,7 @@ class Editor:
         # Encabezado
         pygame.draw.rect(p, (20, 20, 30), (0, 0, ANCHO, HEADER))
         marca = " *" if (self.cambios or self.cambio_offset) else ""
-        self.texto(f"{self.c['titulo']}{marca}  -  EDITOR", self.ctx.fuente, (255, 255, 255), 10, 8)
+        self.texto(f"{self.c['titulo']} [{self.c['dificultad']}]{marca}  -  EDITOR", self.ctx.fuente, (255, 255, 255), 10, 8)
         t = self.c["offset"] + self.cursor * self.seg
         self.texto(f"Beat {self.cursor:.2f}   Tiempo {t:.2f}s   Precision 1/{self.div}   Notas {len(self.notas)}",
                    self.fuente_h, (200, 200, 220), 10, 42)
@@ -298,7 +302,7 @@ class Editor:
 
         ayuda = [
             "Arriba/abajo/rueda: mover   RePag/AvPag: 4 beats   Inicio: principio",
-            "A S D F G o clic: nota   Arrastrar: nota larga   Supr: borrar   1-4: precision",
+            "A S D F o clic: nota   Arrastrar: nota larga   Supr: borrar   1-4: precision",
             "Espacio: reproducir (en vivo, mantener tecla = nota larga)   +/-: zoom   , .: offset",
             "Ctrl+S: guardar   Ctrl+Z: deshacer   T: tick   ESC: detener / salir",
         ]
