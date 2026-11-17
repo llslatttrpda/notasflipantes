@@ -1,0 +1,41 @@
+{
+  "titulo": "Blue Bird (TV Size)",
+  "artista": "Ikimonogakari",
+  "bpm": 74.0,
+  "offset": 1.076,
+  "audio": "audio.ogg",
+  "dificultades": {
+    "easy": {
+      "nombre": "Easy",
+      "chart": "chart_easy.txt",
+      "velocidad": 300,
+      "ventana_perfect": 0.061,
+      "ventana_bueno": 0.135,
+      "multiplicador": 0.8
+    },
+    "maxim-s-normal": {
+      "nombre": "Maxim's Normal",
+      "chart": "chart_maxim-s-normal.txt",
+      "velocidad": 373,
+      "ventana_perfect": 0.059,
+      "ventana_bueno": 0.13,
+      "multiplicador": 1.03
+    },
+    "hard": {
+      "nombre": "Hard",
+      "chart": "chart_hard.txt",
+      "velocidad": 447,
+      "ventana_perfect": 0.056,
+      "ventana_bueno": 0.125,
+      "multiplicador": 1.27
+    },
+    "blue-sky": {
+      "nombre": "Blue Sky",
+      "chart": "chart_blue-sky.txt",
+      "velocidad": 520,
+      "ventana_perfect": 0.054,
+      "ventana_bueno": 0.12,
+      "multiplicador": 1.5
+    }
+  }
+}
