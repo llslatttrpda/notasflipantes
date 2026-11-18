@@ -117,6 +117,18 @@ class Entrada:
             self.estado = [teclas[k] for k in TECLAS]
         return [i for i in range(CARRILES) if self.estado[i] and not previo[i]]
 
+    def enviar_leds(self, estados, cant_leds=18):
+        if not self.ser:
+            return
+        for carril in range(CARRILES):
+            # estados[carril] debe ser una lista de 18 números (0, 1, 2 o 3)
+            colores = estados.get(carril, [0] * cant_leds)
+            linea = f"L{carril}{''.join(str(c) for c in colores)}\n"
+            try:
+                self.ser.write(linea.encode())
+            except Exception:
+                pass
+
 
 class Ctx:
     """Recursos compartidos entre pantallas."""
@@ -557,6 +569,56 @@ def jugar(ctx, cancion, grabar):
                     fallos += 1
                     combo = 0
                     mensaje, t_mensaje = "Fallaste", time.perf_counter()
+
+        # --- LEDs: notas visibles por carril + LED verde de zona de acierto ---
+        # Inicializamos todos los LEDs apagados (0)
+        # 0 = apagado, 1 = nota (celeste), 2 = cola (violeta), 3 = zona de golpe (verde)
+        leds_encendidos = {i: [0] * 18 for i in range(CARRILES)}
+        
+        # El LED verde fijo está en la posición 16 (antepenúltimo)
+        LED_GOLPE = 16
+        
+        if not grabar:
+            for n in notas:
+                activa = n[2] is None or (n[2] == "hit" and n[4])
+                if not activa:
+                    continue
+                
+                # Calculamos dónde está la cabeza de la nota
+                t_nota = offset + n[0] * seg_beat
+                y = LINEA_GOLPE - (t_nota - t) * velocidad
+                
+                # Si la nota está en la tira (desde arriba hasta el LED verde)
+                if -30 < y < ALTO:
+                    # Mapeamos la posición (0 a ALTO) a los LEDs (0 a 16)
+                    proporcion = max(0.0, min(1.0, y / ALTO))
+                    led_cabeza = int((1.0 - proporcion) * LED_GOLPE)
+                    
+                    # Pintamos la cabeza (siempre que no sea el LED verde)
+                    if 0 <= led_cabeza < LED_GOLPE:
+                        leds_encendidos[n[1]][led_cabeza] = 1
+                    
+                    # Si es nota larga, calculamos la cola
+                    if n[3] > 0:
+                        t_cola = offset + (n[0] + n[3]) * seg_beat
+                        y_cola = LINEA_GOLPE - (t_cola - t) * velocidad
+                        
+                        if y_cola < ALTO:
+                            proporcion_cola = max(0.0, min(1.0, y_cola / ALTO))
+                            led_cola = int((1.0 - proporcion_cola) * LED_GOLPE)
+                            
+                            # Pintamos desde la cabeza hacia atrás
+                            for i in range(led_cabeza + 1, led_cola + 1):
+                                if 0 <= i < LED_GOLPE:
+                                    leds_encendidos[n[1]][i] = 2 # Color violeta para la cola
+
+        # Pintamos el LED verde fijo (antepenúltimo)
+        for c in range(CARRILES):
+            leds_encendidos[c][LED_GOLPE] = 3
+
+        # Enviamos el estado al Arduino
+        ctx.entrada.enviar_leds(leds_encendidos)
+
 
         # El final lo marca el chart: cuando ya no queda ninguna nota por resolver
         if not grabar and notas and t_fin is None and all(n[2] is not None and not n[4] for n in notas):

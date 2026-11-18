@@ -8,7 +8,7 @@
     "easy": {
       "nombre": "Easy",
       "chart": "chart_easy.txt",
-      "velocidad": 300,
+      "velocidad": 150,
       "ventana_perfect": 0.061,
       "ventana_bueno": 0.135,
       "multiplicador": 0.8
@@ -16,7 +16,7 @@
     "maxim-s-normal": {
       "nombre": "Maxim's Normal",
       "chart": "chart_maxim-s-normal.txt",
-      "velocidad": 373,
+      "velocidad": 150,
       "ventana_perfect": 0.059,
       "ventana_bueno": 0.13,
       "multiplicador": 1.03
