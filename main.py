@@ -42,7 +42,7 @@ except ImportError:
 
 # ---------- Configuracion ----------
 PUERTO = "auto"   # "auto" busca el Arduino solo; o poner a mano, ej: "COM5"
-BAUDIOS = 9600
+BAUDIOS = 115200
 ANCHO, ALTO = 600, 800
 LINEA_GOLPE = ALTO - 120
 LEAD = 3.0               # segundos antes de que arranque la musica
@@ -85,6 +85,7 @@ class Entrada:
         self.estado = [False] * CARRILES
         self.avisado = False
         self.puerto_actual = "Ninguno"
+        self.ultimo_envio = None
         if serial:
             candidatos = [] if PUERTO == "auto" else [PUERTO]
             auto = detectar_puerto()
@@ -125,9 +126,20 @@ class Entrada:
             self.estado = [teclas[k] for k in TECLAS]
         return [i for i in range(CARRILES) if self.estado[i] and not previo[i]]
 
-    def enviar_leds(self, estados, cant_leds=18):
+    def enviar_leds(self, estados, cant_leds=50):
         if not self.ser:
             return
+            
+        # Creamos una "firma" (hash) del estado actual
+        estado_actual = tuple(tuple(estados.get(c, [])) for c in range(CARRILES))
+        
+        # Si el estado es idéntico al anterior, no hacemos nada (ahorra tiempo y evita delay)
+        if self.ultimo_envio == estado_actual:
+            return
+            
+        self.ultimo_envio = estado_actual
+
+        # Enviamos los datos
         for carril in range(CARRILES):
             colores = estados.get(carril, [0] * cant_leds)
             linea = f"L{carril}{''.join(str(c) for c in colores)}\n"
@@ -855,6 +867,7 @@ def resultados(ctx, cancion, res, nuevo_record, record_anterior):
 
 # ---------- Programa principal ----------
 def main():
+    pygame.mixer.pre_init(44100, -16, 2, 512)
     pygame.init()
     pygame.mixer.init()
     ctx = Ctx()

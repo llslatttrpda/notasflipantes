@@ -23,7 +23,7 @@ char anterior[NUM_STRIPS + 1] = "0000";
 String buffer = "";
 
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
   for (int i = 0; i < NUM_STRIPS; i++) {
     pinMode(BOTONES[i], INPUT_PULLUP);
     tiras[i].begin();
