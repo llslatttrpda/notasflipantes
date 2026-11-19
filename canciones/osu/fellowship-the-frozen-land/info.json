@@ -1,0 +1,65 @@
+{
+  "titulo": "The Frozen Land",
+  "artista": "Fellowship",
+  "bpm": 200.0,
+  "offset": 0.128,
+  "audio": "audio.ogg",
+  "dificultades": {
+    "kori-s-easy": {
+      "nombre": "Kori's Easy",
+      "chart": "chart_kori-s-easy.txt",
+      "velocidad": 300,
+      "ventana_perfect": 0.06,
+      "ventana_bueno": 0.133,
+      "multiplicador": 0.8
+    },
+    "azukkii-s-normal": {
+      "nombre": "Azukkii's Normal",
+      "chart": "chart_azukkii-s-normal.txt",
+      "velocidad": 337,
+      "ventana_perfect": 0.059,
+      "ventana_bueno": 0.13,
+      "multiplicador": 0.92
+    },
+    "foxide-s-advanced": {
+      "nombre": "Foxide's Advanced",
+      "chart": "chart_foxide-s-advanced.txt",
+      "velocidad": 373,
+      "ventana_perfect": 0.056,
+      "ventana_bueno": 0.125,
+      "multiplicador": 1.03
+    },
+    "llee-s-hard": {
+      "nombre": "Llee's Hard",
+      "chart": "chart_llee-s-hard.txt",
+      "velocidad": 410,
+      "ventana_perfect": 0.055,
+      "ventana_bueno": 0.122,
+      "multiplicador": 1.15
+    },
+    "zell-s-insane": {
+      "nombre": "Zell's Insane",
+      "chart": "chart_zell-s-insane.txt",
+      "velocidad": 447,
+      "ventana_perfect": 0.054,
+      "ventana_bueno": 0.12,
+      "multiplicador": 1.27
+    },
+    "tapperruiii-s-insane": {
+      "nombre": "tapperruiii's Insane",
+      "chart": "chart_tapperruiii-s-insane.txt",
+      "velocidad": 483,
+      "ventana_perfect": 0.054,
+      "ventana_bueno": 0.12,
+      "multiplicador": 1.38
+    },
+    "faithful": {
+      "nombre": "Faithful",
+      "chart": "chart_faithful.txt",
+      "velocidad": 520,
+      "ventana_perfect": 0.054,
+      "ventana_bueno": 0.12,
+      "multiplicador": 1.5
+    }
+  }
+}

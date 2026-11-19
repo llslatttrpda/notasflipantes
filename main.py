@@ -26,6 +26,7 @@ Juego:   flechas IZQ/DER ajustan el offset (se guarda al terminar)  |  ESC = vol
 Teclado si no hay Arduino: A S D F (4 carriles, ver config.py)
 """
 import json
+import math
 import os
 import random
 import time
@@ -83,6 +84,7 @@ class Entrada:
         self.ser = None
         self.estado = [False] * CARRILES
         self.avisado = False
+        self.puerto_actual = "Ninguno"
         if serial:
             candidatos = [] if PUERTO == "auto" else [PUERTO]
             auto = detectar_puerto()
@@ -93,6 +95,7 @@ class Entrada:
                     self.ser = serial.Serial(puerto, BAUDIOS, timeout=0)
                     time.sleep(2)  # el Arduino se reinicia al abrir el puerto
                     print(f"Arduino conectado en {puerto}")
+                    self.puerto_actual = puerto
                     break
                 except serial.SerialException as e:
                     print(f"No pude abrir {puerto}: {e}")
@@ -104,14 +107,19 @@ class Entrada:
         """Devuelve los carriles recien presionados en este frame."""
         previo = self.estado[:]
         if self.ser:
-            while self.ser.in_waiting:
-                linea = self.ser.readline().decode(errors="ignore").strip()
-                if len(linea) == CARRILES and set(linea) <= {"0", "1"}:
-                    self.estado = [c == "1" for c in linea]
-                elif len(linea) > CARRILES and set(linea) <= {"0", "1"} and not self.avisado:
-                    self.avisado = True
-                    print(f"AVISO: el Arduino manda {len(linea)} botones y el juego espera {CARRILES}. "
-                          "Subi el sketch actualizado (guitar_hero.ino).")
+            try:
+                while self.ser.in_waiting:
+                    linea = self.ser.readline().decode(errors="ignore").strip()
+                    if len(linea) == CARRILES and set(linea) <= {"0", "1"}:
+                        self.estado = [c == "1" for c in linea]
+                    elif len(linea) > CARRILES and set(linea) <= {"0", "1"} and not self.avisado:
+                        self.avisado = True
+                        print(f"AVISO: el Arduino manda {len(linea)} botones y el juego espera {CARRILES}. "
+                              "Subi el sketch actualizado (guitar_hero.ino).")
+            except Exception:
+                self.ser = None
+                self.puerto_actual = "Ninguno"
+                print("Arduino desconectado. Usando teclado.")
         else:
             teclas = pygame.key.get_pressed()
             self.estado = [teclas[k] for k in TECLAS]
@@ -121,13 +129,15 @@ class Entrada:
         if not self.ser:
             return
         for carril in range(CARRILES):
-            # estados[carril] debe ser una lista de 18 números (0, 1, 2 o 3)
             colores = estados.get(carril, [0] * cant_leds)
             linea = f"L{carril}{''.join(str(c) for c in colores)}\n"
             try:
                 self.ser.write(linea.encode())
             except Exception:
-                pass
+                self.ser = None
+                self.puerto_actual = "Ninguno"
+                print("Arduino desconectado (fallo al enviar LEDs).")
+                break
 
 
 class Ctx:
@@ -141,6 +151,12 @@ def buscar_audio(ruta):
             return os.path.join(ruta, nombre)
     return None
 
+def buscar_portada(ruta):
+    """Busca una imagen de portada en la carpeta de la cancion."""
+    for nombre in sorted(os.listdir(ruta)):
+        if nombre.lower().endswith((".jpg", ".jpeg", ".png")):
+            return os.path.join(ruta, nombre)
+    return None
 
 def leer_dificultades(ruta, info):
     """Una dificultad por cada entrada de info['dificultades']; si no hay, una sola 'Normal'."""
@@ -174,6 +190,7 @@ def leer_cancion(ruta, id_rel):
         print(f"Ignoro {ruta_info}: no es un JSON valido ({e})")
         return None
     audio = os.path.join(ruta, info["audio"]) if info.get("audio") else buscar_audio(ruta)
+    portada = buscar_portada(ruta)
     return {
         "id": id_rel,
         "titulo": info.get("titulo", os.path.basename(ruta)),
@@ -181,6 +198,7 @@ def leer_cancion(ruta, id_rel):
         "bpm": float(info.get("bpm", 100)),
         "offset": float(info.get("offset", 0.0)),
         "audio": audio,
+        "portada": portada,
         "info_path": ruta_info,
         "dificultades": leer_dificultades(ruta, info),
     }
@@ -388,6 +406,17 @@ def menu(ctx, colecciones, puntajes, estado):
 
         ctx.pantalla.fill((20, 20, 30))
         texto(ctx, "GUITAR HERO + ARDUINO", ctx.grande, (255, 255, 255), ANCHO // 2, 30, True)
+        
+        # --- Estado del Arduino ---
+        if ctx.entrada.ser:
+            estado_txt = f"Arduino: Conectado ({ctx.entrada.puerto_actual})"
+            color_txt = (0, 255, 0) # Verde
+        else:
+            estado_txt = "Arduino: Desconectado (Usando teclado)"
+            color_txt = (255, 100, 100) # Rojo
+            
+        ancho_txt = ctx.chica.size(estado_txt)[0]
+        texto(ctx, estado_txt, ctx.chica, color_txt, ANCHO - ancho_txt - 10, 10)
 
         if not colecciones:
             texto(ctx, "No hay canciones en la carpeta 'canciones'.", ctx.chica, (255, 160, 160), ANCHO // 2, 200, True)
@@ -464,9 +493,40 @@ def menu(ctx, colecciones, puntajes, estado):
         pygame.display.flip()
 
 
+def dibujar_vinilo(ctx, cancion, t):
+    """Dibuja un vinilo girando con la portada en el medio."""
+    pantalla = ctx.pantalla
+    centro_x, centro_y = ANCHO // 2, 150
+    radio_vinilo = 110
+    radio_portada = 45
+
+    pygame.draw.circle(pantalla, (15, 15, 15), (centro_x, centro_y), radio_vinilo)
+    for r in range(radio_portada + 5, radio_vinilo, 8):
+        pygame.draw.circle(pantalla, (40, 40, 40), (centro_x, centro_y), r, 1)
+
+    if cancion.get("portada"):
+        try:
+            img = pygame.image.load(cancion["portada"]).convert_alpha()
+            img = pygame.transform.smoothscale(img, (radio_portada * 2, radio_portada * 2))
+            pantalla.blit(img, (centro_x - radio_portada, centro_y - radio_portada))
+        except Exception:
+            pygame.draw.circle(pantalla, (100, 100, 100), (centro_x, centro_y), radio_portada)
+    else:
+        pygame.draw.circle(pantalla, (60, 60, 60), (centro_x, centro_y), radio_portada)
+        texto(ctx, cancion["titulo"][:10], ctx.chica, (200, 200, 200), centro_x, centro_y - 10, True)
+
+    pygame.draw.circle(pantalla, (20, 20, 30), (centro_x, centro_y), 8)
+    
+    angulo = t * 2.0
+    marca_x = centro_x + int(math.cos(angulo) * (radio_vinilo - 15))
+    marca_y = centro_y + int(math.sin(angulo) * (radio_vinilo - 15))
+    pygame.draw.circle(pantalla, (200, 200, 200), (marca_x, marca_y), 3)
+    
+    pygame.draw.circle(pantalla, (80, 80, 100), (centro_x, centro_y), radio_vinilo, 3)
+
+
 # ---------- Pantalla: juego ----------
 def jugar(ctx, cancion, grabar):
-    """Devuelve un dict con el resultado. Claves: cerrar / error / completo / puntaje ..."""
     if not cancion["audio"]:
         return {"error": "No encontre ningun .mp3/.ogg/.wav en la carpeta de la cancion."}
     try:
@@ -476,7 +536,7 @@ def jugar(ctx, cancion, grabar):
         return {"error": f"No pude cargar el audio: {e}"}
 
     seg_beat = 60.0 / cancion["bpm"]
-    vp, vb = cancion["vent_perfect"], cancion["vent_bueno"]   # ventanas segun la dificultad
+    vp, vb = cancion["vent_perfect"], cancion["vent_bueno"]
     mult = cancion["multiplicador"]
     velocidad = cancion["velocidad"]
     ancho_carril = ANCHO // CARRILES
@@ -491,14 +551,21 @@ def jugar(ctx, cancion, grabar):
     cerrar = False
     corriendo = True
     t_prev = -LEAD
-    t_fin = None  # momento en que se resolvio la ultima nota del chart
-    resto = 0.0   # puntos fraccionarios por mantener notas largas
+    t_fin = None
+    resto = 0.0
+    t_vinilo = 0.0
+
+    modo_arduino = ctx.entrada.ser is not None
+
+    # --- ESTADO DE LOS BOTONES PARA LA TRANSICIÓN DE COLOR ---
+    lane_state = {i: {'pressed': False, 'release_t': -10.0} for i in range(CARRILES)}
 
     while corriendo:
         ctx.reloj.tick(120)
         t = time.perf_counter() - t0 - LEAD
         dt = max(0.0, t - t_prev)
         t_prev = t
+        t_vinilo += dt
         if not musica_ok and t >= 0:
             pygame.mixer.music.play()
             musica_ok = True
@@ -516,6 +583,15 @@ def jugar(ctx, cancion, grabar):
                     cancion["offset"] += 0.01
         offset = cancion["offset"]
 
+        # --- ACTUALIZAR ESTADO DE BOTONES ---
+        for c in range(CARRILES):
+            is_pressed = ctx.entrada.estado[c]
+            if is_pressed and not lane_state[c]['pressed']:
+                lane_state[c]['pressed'] = True
+            elif not is_pressed and lane_state[c]['pressed']:
+                lane_state[c]['pressed'] = False
+                lane_state[c]['release_t'] = t
+
         for carril in ctx.entrada.actualizar():
             if grabar:
                 beat = round((t - offset) / seg_beat * 2) / 2
@@ -529,7 +605,7 @@ def jugar(ctx, cancion, grabar):
                 n = min(cand, key=lambda n: abs(offset + n[0] * seg_beat - t))
                 dif = abs(offset + n[0] * seg_beat - t)
                 n[2] = "hit"
-                n[4] = n[3] > 0   # si es nota larga, hay que mantenerla
+                n[4] = n[3] > 0
                 combo += 1
                 max_combo = max(max_combo, combo)
                 if dif <= vp:
@@ -546,7 +622,7 @@ def jugar(ctx, cancion, grabar):
 
         if not grabar:
             for n in notas:
-                if n[4]:  # nota larga que se esta sosteniendo
+                if n[4]:
                     fin = offset + (n[0] + n[3]) * seg_beat
                     if t >= fin or (not ctx.entrada.estado[n[1]] and t >= fin - 0.1):
                         n[4] = False
@@ -570,102 +646,146 @@ def jugar(ctx, cancion, grabar):
                     combo = 0
                     mensaje, t_mensaje = "Fallaste", time.perf_counter()
 
-        # --- LEDs: notas visibles por carril + LED verde de zona de acierto ---
-        # Inicializamos todos los LEDs apagados (0)
-        # 0 = apagado, 1 = nota (celeste), 2 = cola (violeta), 3 = zona de golpe (verde)
-        leds_encendidos = {i: [0] * 18 for i in range(CARRILES)}
+        # --- LÓGICA DE LEDS (50 LEDs INVERTIDOS) ---
+        leds_encendidos = {i: [0] * 50 for i in range(CARRILES)}
         
-        # El LED verde fijo está en la posición 16 (antepenúltimo)
-        LED_GOLPE = 16
+        # El golpe está en el quinto LED (índice 4) contando desde el 0
+        LED_GOLPE = 4
+        LED_TOPE = 49 # Las notas nacen en el último LED (arriba de todo)
         
         if not grabar:
             for n in notas:
                 activa = n[2] is None or (n[2] == "hit" and n[4])
                 if not activa:
                     continue
-                
-                # Calculamos dónde está la cabeza de la nota
                 t_nota = offset + n[0] * seg_beat
                 y = LINEA_GOLPE - (t_nota - t) * velocidad
                 
-                # Si la nota está en la tira (desde arriba hasta el LED verde)
-                if -30 < y < ALTO:
-                    # Mapeamos la posición (0 a ALTO) a los LEDs (0 a 16)
-                    proporcion = max(0.0, min(1.0, y / ALTO))
-                    led_cabeza = int((1.0 - proporcion) * LED_GOLPE)
+                # Mapeo: cuando y=LINEA_GOLPE (abajo) -> LED 4
+                # Cuando y=0 (arriba) -> LED 49
+                if -30 < y <= LINEA_GOLPE + 30:
+                    proporcion = max(0.0, min(1.0, y / LINEA_GOLPE))
+                    # Interpolación de LED 49 (arriba) a LED 4 (abajo)
+                    led_cabeza = int(LED_GOLPE + (LED_TOPE - LED_GOLPE) * (1.0 - proporcion))
                     
-                    # Pintamos la cabeza (siempre que no sea el LED verde)
-                    if 0 <= led_cabeza < LED_GOLPE:
+                    if LED_GOLPE <= led_cabeza <= LED_TOPE:
                         leds_encendidos[n[1]][led_cabeza] = 1
-                    
-                    # Si es nota larga, calculamos la cola
+                        
                     if n[3] > 0:
                         t_cola = offset + (n[0] + n[3]) * seg_beat
                         y_cola = LINEA_GOLPE - (t_cola - t) * velocidad
-                        
-                        if y_cola < ALTO:
-                            proporcion_cola = max(0.0, min(1.0, y_cola / ALTO))
-                            led_cola = int((1.0 - proporcion_cola) * LED_GOLPE)
+                        if y_cola <= LINEA_GOLPE + 30:
+                            proporcion_cola = max(0.0, min(1.0, y_cola / LINEA_GOLPE))
+                            led_cola = int(LED_GOLPE + (LED_TOPE - LED_GOLPE) * (1.0 - proporcion_cola))
                             
-                            # Pintamos desde la cabeza hacia atrás
-                            for i in range(led_cabeza + 1, led_cola + 1):
-                                if 0 <= i < LED_GOLPE:
-                                    leds_encendidos[n[1]][i] = 2 # Color violeta para la cola
+                            # La cola va desde la cabeza hacia arriba
+                            for i in range(led_cabeza, led_cola + 1):
+                                if LED_GOLPE < i <= LED_TOPE:
+                                    leds_encendidos[n[1]][i] = 2
 
-        # Pintamos el LED verde fijo (antepenúltimo)
+        # --- ESTADO DEL LED DE GOLPE (VERDE/ROJO/AMARILLO/NARANJA) ---
         for c in range(CARRILES):
-            leds_encendidos[c][LED_GOLPE] = 3
+            if lane_state[c]['pressed']:
+                leds_encendidos[c][LED_GOLPE] = 4 # Rojo
+            else:
+                dt_release = t - lane_state[c]['release_t']
+                if dt_release < 0.15:
+                    leds_encendidos[c][LED_GOLPE] = 5 # Amarillo
+                elif dt_release < 0.3:
+                    leds_encendidos[c][LED_GOLPE] = 6 # Naranja
+                else:
+                    leds_encendidos[c][LED_GOLPE] = 3 # Verde
 
-        # Enviamos el estado al Arduino
-        ctx.entrada.enviar_leds(leds_encendidos)
+        ctx.entrada.enviar_leds(leds_encendidos, cant_leds=50)
 
-
-        # El final lo marca el chart: cuando ya no queda ninguna nota por resolver
+        # Fin de canción
         if not grabar and notas and t_fin is None and all(n[2] is not None and not n[4] for n in notas):
             t_fin = t
         if t_fin is not None and t - t_fin >= PAUSA_FINAL:
             completo = True
             corriendo = False
         elif musica_ok and t > 1 and not pygame.mixer.music.get_busy():
-            completo = True   # (se termino la cancion antes que el chart)
+            completo = True
             corriendo = False
 
-        # ----- Dibujo -----
+        # ----- DIBUJO -----
         ctx.pantalla.fill((20, 20, 30))
-        for i in range(CARRILES):
-            x = i * ancho_carril
-            pygame.draw.line(ctx.pantalla, (60, 60, 80), (x, 0), (x, ALTO))
-            relleno = 0 if ctx.entrada.estado[i] else 3
-            pygame.draw.circle(ctx.pantalla, COLORES[i], (x + ancho_carril // 2, LINEA_GOLPE), 28, relleno)
-        if not grabar:
-            for n in notas:
-                activa = n[2] is None or (n[2] == "hit" and n[4])
-                if not activa:
-                    continue
-                cx = n[1] * ancho_carril + ancho_carril // 2
-                y = LINEA_GOLPE - (offset + n[0] * seg_beat - t) * velocidad
-                if n[3] > 0:
-                    y_fin = LINEA_GOLPE - (offset + (n[0] + n[3]) * seg_beat - t) * velocidad
-                    y_cab = min(y, LINEA_GOLPE) if n[4] else y
-                    if y_cab > -30 and y_fin < ALTO + 30:
-                        base = COLORES[n[1]]
-                        color_cola = base if n[4] else tuple(c // 2 + 40 for c in base)
-                        pygame.draw.rect(ctx.pantalla, color_cola,
-                                         (cx - 9, int(y_fin), 18, max(1, int(y_cab - y_fin))))
-                    y = y_cab
-                if -30 < y < ALTO + 30:
-                    pygame.draw.circle(ctx.pantalla, COLORES[n[1]], (cx, int(y)), 24)
-        texto(ctx, f"Puntaje {puntaje}   Combo {combo}", ctx.fuente, (255, 255, 255), 10, 10)
-        texto(ctx, f"{cancion['titulo']} [{cancion['dificultad']}]  |  Offset {offset:+.2f}s (flechas IZQ/DER)", ctx.chica, (170, 170, 190), 10, 45)
-        if grabar:
-            texto(ctx, "MODO GRABAR - ESC para guardar", ctx.chica, (255, 120, 120), 10, 70)
-        if mensaje and time.perf_counter() - t_mensaje < 0.6:
-            texto(ctx, mensaje, ctx.fuente, (255, 255, 255), ANCHO // 2, LINEA_GOLPE - 90, True)
+        
+        if modo_arduino:
+            # MODO INMERSIVO (CON ARDUINO)
+            centro_x, centro_y = ANCHO // 2, ALTO // 2
+            radio_vinilo = 220
+            radio_portada = 90
+            
+            pygame.draw.circle(ctx.pantalla, (15, 15, 15), (centro_x, centro_y), radio_vinilo)
+            for r in range(radio_portada + 10, radio_vinilo, 12):
+                pygame.draw.circle(ctx.pantalla, (40, 40, 40), (centro_x, centro_y), r, 2)
+            
+            if cancion.get("portada"):
+                try:
+                    img = pygame.image.load(cancion["portada"]).convert_alpha()
+                    img = pygame.transform.smoothscale(img, (radio_portada * 2, radio_portada * 2))
+                    ctx.pantalla.blit(img, (centro_x - radio_portada, centro_y - radio_portada))
+                except Exception:
+                    pygame.draw.circle(ctx.pantalla, (100, 100, 100), (centro_x, centro_y), radio_portada)
+            else:
+                pygame.draw.circle(ctx.pantalla, (60, 60, 60), (centro_x, centro_y), radio_portada)
+            
+            pygame.draw.circle(ctx.pantalla, (20, 20, 30), (centro_x, centro_y), 15)
+            angulo = t_vinilo * 2.0
+            marca_x = centro_x + int(math.cos(angulo) * (radio_vinilo - 25))
+            marca_y = centro_y + int(math.sin(angulo) * (radio_vinilo - 25))
+            pygame.draw.circle(ctx.pantalla, (200, 200, 200), (marca_x, marca_y), 6)
+            pygame.draw.circle(ctx.pantalla, (80, 80, 100), (centro_x, centro_y), radio_vinilo, 5)
+
+            texto(ctx, cancion['titulo'], ctx.grande, (255, 255, 255), ANCHO // 2, centro_y + radio_vinilo + 30, True)
+            texto(ctx, cancion['artista'], ctx.fuente, (200, 200, 200), ANCHO // 2, centro_y + radio_vinilo + 90, True)
+            texto(ctx, f"Puntaje: {puntaje}  |  Combo: {combo}", ctx.fuente, (0, 255, 0), ANCHO // 2, 50, True)
+
+        else:
+            # MODO TECLADO
+            dibujar_vinilo(ctx, cancion, t_vinilo)
+            for i in range(CARRILES):
+                x = i * ancho_carril
+                pygame.draw.line(ctx.pantalla, (60, 60, 80), (x, 0), (x, ALTO))
+                relleno = 0 if ctx.entrada.estado[i] else 3
+                pygame.draw.circle(ctx.pantalla, COLORES[i], (x + ancho_carril // 2, LINEA_GOLPE), 28, relleno)
+            
+            if not grabar:
+                for n in notas:
+                    activa = n[2] is None or (n[2] == "hit" and n[4])
+                    if not activa:
+                        continue
+                    cx = n[1] * ancho_carril + ancho_carril // 2
+                    y = LINEA_GOLPE - (offset + n[0] * seg_beat - t) * velocidad
+                    if n[3] > 0:
+                        y_fin = LINEA_GOLPE - (offset + (n[0] + n[3]) * seg_beat - t) * velocidad
+                        y_cab = min(y, LINEA_GOLPE) if n[4] else y
+                        if y_cab > -30 and y_fin < ALTO + 30:
+                            base = COLORES[n[1]]
+                            color_cola = base if n[4] else tuple(c // 2 + 40 for c in base)
+                            pygame.draw.rect(ctx.pantalla, color_cola,
+                                             (cx - 9, int(y_fin), 18, max(1, int(y_cab - y_fin))))
+                        y = y_cab
+                    if -30 < y < ALTO + 30:
+                        pygame.draw.circle(ctx.pantalla, COLORES[n[1]], (cx, int(y)), 24)
+            
+            texto(ctx, f"Puntaje {puntaje}   Combo {combo}", ctx.fuente, (255, 255, 255), 10, 10)
+            texto(ctx, f"{cancion['titulo']} [{cancion['dificultad']}]  |  Offset {offset:+.2f}s (flechas IZQ/DER)", ctx.chica, (170, 170, 190), 10, 45)
+
+        # Cartel de inicio
+        if 0 <= t < 3.0:
+            if int(t * 4) % 2 == 0:
+                fondo_cartel = pygame.Surface((400, 60), pygame.SRCALPHA)
+                fondo_cartel.fill((0, 0, 0, 180))
+                ctx.pantalla.blit(fondo_cartel, (ANCHO//2 - 200, ALTO//2 - 200))
+                texto(ctx, "¡CANCIÓN INICIADA!", ctx.fuente, (0, 255, 0), ANCHO // 2, ALTO//2 - 190, True)
+
         pygame.display.flip()
 
-    fondo = ctx.pantalla.copy()   # ultimo cuadro, para el fundido de la pantalla final
+    fondo = ctx.pantalla.copy()
     if not (completo and not grabar):
-        pygame.mixer.music.stop()   # si se completo el chart, el tema sigue sonando de fondo
+        pygame.mixer.music.stop()
     if grabar and grabadas:
         guardar_chart(cancion, grabadas)
     if abs(cancion["offset"] - offset_inicial) > 1e-9:
@@ -675,7 +795,6 @@ def jugar(ctx, cancion, grabar):
         "perfectos": perfectos, "buenos": buenos, "fallos": fallos, "max_combo": max_combo,
         "fondo": fondo,
     }
-
 
 # ---------- Pantalla: resultados ----------
 def resultados(ctx, cancion, res, nuevo_record, record_anterior):
@@ -688,11 +807,9 @@ def resultados(ctx, cancion, res, nuevo_record, record_anterior):
     while True:
         ctx.reloj.tick(60)
         pasado = time.perf_counter() - t_ini
-        # La musica baja a VOLUMEN_FONDO en FADE_VOLUMEN segundos y se queda sonando
         prog_vol = min(1.0, pasado / FADE_VOLUMEN)
         pygame.mixer.music.set_volume(1.0 - (1.0 - VOLUMEN_FONDO) * prog_vol)
         prog = min(1.0, pasado / FADE_PANTALLA)
-        # Hasta que termina el fundido se ignoran los botones (todavia se esta tocando)
         listo = pasado >= FADE_PANTALLA
 
         pulsados = ctx.entrada.actualizar()
@@ -762,7 +879,7 @@ def main():
         if accion_menu == "editar":
             import editor
             res_ed = editor.editar(ctx, cancion)
-            cancion["_base"]["offset"] = cancion["offset"]   # conservar el offset calibrado
+            cancion["_base"]["offset"] = cancion["offset"]
             if res_ed == "cerrar":
                 pygame.quit()
                 return
@@ -787,6 +904,7 @@ def main():
                 guardar_puntajes(puntajes)
             accion = resultados(ctx, cancion, res, nuevo, anterior)
             pygame.mixer.music.stop()
+            
             pygame.mixer.music.set_volume(1.0)
             if accion == "cerrar":
                 pygame.quit()

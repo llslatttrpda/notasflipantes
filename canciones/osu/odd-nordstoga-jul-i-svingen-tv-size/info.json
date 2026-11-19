@@ -1,0 +1,17 @@
+{
+  "titulo": "Jul i Svingen (TV Size)",
+  "artista": "Odd Nordstoga",
+  "bpm": 140.0,
+  "offset": 4.0347,
+  "audio": "audio.mp3",
+  "dificultades": {
+    "god-jul": {
+      "nombre": "God jul!",
+      "chart": "chart_god-jul.txt",
+      "velocidad": 400,
+      "ventana_perfect": 0.061,
+      "ventana_bueno": 0.135,
+      "multiplicador": 1.0
+    }
+  }
+}

@@ -37,7 +37,6 @@ import json
 import math
 import os
 import re
-import shutil
 import sys
 import unicodedata
 import zipfile
@@ -47,12 +46,13 @@ from config import CARRILES
 BASE = os.path.dirname(os.path.abspath(__file__))
 MODOS = {"0": "osu!standard", "1": "osu!taiko", "2": "osu!catch", "3": "osu!mania"}
 HOLD_MIN_BEATS = 0.25      # un LN mas corto que esto se convierte en nota normal
-TOLERANCIA_MS = 3.0         # cuanto se puede mover una nota para alinearla a la grilla
+TOLERANCIA_MS = 3.0        # cuanto se puede mover una nota para alinearla a la grilla
 
 
 # ---------------------------------------------------------------- lectura de .osu
 def decodificar(datos):
-    for codificacion in ("utf-8-sig", "latin-1"):
+    """Intenta decodificar el archivo con varias codificaciones tipicas de osu!"""
+    for codificacion in ("utf-8-sig", "utf-8", "latin-1"):
         try:
             return datos.decode(codificacion)
         except UnicodeDecodeError:
@@ -177,45 +177,58 @@ def parametros_dificultad(rank, total, od):
 
 # ---------------------------------------------------------------- conversion
 def convertir_archivo(ruta, coleccion, destino, sobrescribir, exacto=False):
-    print(f"\n=== {os.path.basename(ruta)} ===")
-    contenido = leer_archivo(ruta)
+    print(f"\n=== Analizando: {os.path.basename(ruta)} ===")
+    try:
+        contenido = leer_archivo(ruta)
+    except SystemExit as e:
+        print(e)
+        return 0
+        
     mapas, descartados = [], []
-    for nombre, datos in contenido.items():
-        if not nombre.lower().endswith(".osu"):
+    
+    archivos_osu = [n for n in contenido.keys() if n.lower().endswith(".osu")]
+    print(f"  Se encontraron {len(archivos_osu)} archivos .osu dentro del paquete.")
+
+    for nombre in archivos_osu:
+        datos = contenido[nombre]
+        try:
+            mapa = parsear_osu(decodificar(datos))
+        except Exception as e:
+            print(f"    - {nombre}: ERROR al leer el archivo: {e}")
             continue
-        mapa = parsear_osu(decodificar(datos))
+            
         mapa["archivo"] = nombre
         version = mapa["meta"].get("Version", nombre)
-        modo = mapa["general"].get("Mode", "0")
-        if modo != "3":
-            descartados.append((version, MODOS.get(modo, f"modo {modo}"), False))
-            continue
+        modo = mapa["general"].get("Mode", "0").strip()
+        
         try:
             teclas = int(float(mapa["dif"].get("CircleSize", 4)))
         except ValueError:
             teclas = 0
+            
+        print(f"    - {nombre}: Modo={MODOS.get(modo, modo)}, Teclas={teclas}, Dificultad='{version}'")
+        
+        if modo != "3":
+            descartados.append((version, MODOS.get(modo, f"modo {modo}"), False))
+            continue
         if teclas != CARRILES:
             descartados.append((version, f"osu!mania {teclas}K", True))
             continue
         if not mapa["puntos"] or not mapa["objetos"]:
-            print(f"  - {nombre}: sin timing points o sin notas, se omite")
+            print(f"      (Omitido: no tiene notas o le faltan los TimingPoints)")
             continue
+            
         mapas.append(mapa)
 
     if descartados:
         cabecera = "Se omitieron" if mapas else "No se convirtio ninguno. Se omitieron"
-        print(f"  {cabecera} {len(descartados)} beatmaps (solo se convierte osu!mania de {CARRILES} teclas):")
+        print(f"\n  {cabecera} {len(descartados)} beatmaps (solo se convierte osu!mania de {CARRILES} teclas):")
         for version, motivo, _ in descartados:
             print(f"    - {version}: {motivo}")
 
     if not mapas:
-        if not any(n.lower().endswith(".osu") for n in contenido):
-            extra = " Ojo: .osk es el formato de SKINS de osu!; los niveles son .osz." \
-                if ruta.lower().endswith(".osk") else ""
-            print(f"  No encontre ningun beatmap (.osu) en el archivo.{extra}")
-        elif any(not es_mania for _, _, es_mania in descartados):
-            print("  Ese nivel es de otro modo de juego. Para este juego busca niveles de osu!mania 4K "
-                  "(en la web de osu!, filtro Modo: mania y 4K).")
+        if not archivos_osu:
+            print("  No encontre ningun archivo .osu en el paquete.")
         return 0
 
     grupos = {}   # un grupo por archivo de audio (una cancion)
@@ -234,8 +247,9 @@ def convertir_cancion(contenido, audio_nombre, grupo, ruta_origen, coleccion, de
     titulo = meta.get("Title") or meta.get("TitleUnicode") or "Sin titulo"
     artista = meta.get("Artist") or meta.get("ArtistUnicode") or ""
     carpeta = os.path.join(destino, coleccion, slug(f"{artista} {titulo}"))
+    
     if os.path.exists(carpeta) and not sobrescribir:
-        print(f"  '{carpeta}' ya existe. Usa --sobrescribir para reemplazarla.")
+        print(f"\n  La carpeta '{carpeta}' ya existe. Usa --sobrescribir para reemplazarla.")
         return False
 
     # BPM y offset de la cancion: primer timing point del primer beatmap
@@ -312,7 +326,7 @@ def convertir_cancion(contenido, audio_nombre, grupo, ruta_origen, coleccion, de
         with open(ruta_col, "w", encoding="utf-8") as f:
             json.dump({"titulo": coleccion, "descripcion": "Importadas de osu!"}, f, indent=2, ensure_ascii=False)
 
-    print(f"  -> {carpeta}")
+    print(f"  -> Guardado en: {carpeta}")
     print(f"     {bpm:g} BPM, offset {info['offset']}s. Si no suena sincronizado, calibra con IZQ/DER.")
     return True
 

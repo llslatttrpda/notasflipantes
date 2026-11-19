@@ -1,21 +1,22 @@
 #include <Adafruit_NeoPixel.h>
 
+// ================== CONFIGURACIÓN ==================
 #define NUM_STRIPS     4
-#define LEDS_POR_TIRA  18
-#define BRILLO         100
+#define LEDS_POR_TIRA  50      // <-- AHORA SON 50 LEDS
+#define BRILLO         100     
 
 const uint8_t BOTONES[NUM_STRIPS] = {2, 3, 4, 5};
 const uint8_t PINES[NUM_STRIPS]   = {8, 9, 10, 11};
 
-const uint32_t COLOR_APAGADO = Adafruit_NeoPixel::Color(0, 0, 0);
+// Colores
 const uint32_t COLOR_NOTA    = Adafruit_NeoPixel::Color(0, 150, 255); // Celeste
 const uint32_t COLOR_GOLPE   = Adafruit_NeoPixel::Color(0, 255, 0);   // Verde
 
 Adafruit_NeoPixel tiras[NUM_STRIPS] = {
-  Adafruit_NeoPixel(LEDS_POR_TIRA, PINES[0], NEO_GRB + NEO_KHZ800),
-  Adafruit_NeoPixel(LEDS_POR_TIRA, PINES[1], NEO_GRB + NEO_KHZ800),
-  Adafruit_NeoPixel(LEDS_POR_TIRA, PINES[2], NEO_GRB + NEO_KHZ800),
-  Adafruit_NeoPixel(LEDS_POR_TIRA, PINES[3], NEO_GRB + NEO_KHZ800)
+  Adafruit_NeoPixel(LEDS_POR_TIRA, PINES[0], NEO_RGB + NEO_KHZ800),
+  Adafruit_NeoPixel(LEDS_POR_TIRA, PINES[1], NEO_RGB + NEO_KHZ800),
+  Adafruit_NeoPixel(LEDS_POR_TIRA, PINES[2], NEO_RGB + NEO_KHZ800),
+  Adafruit_NeoPixel(LEDS_POR_TIRA, PINES[3], NEO_RGB + NEO_KHZ800)
 };
 
 char anterior[NUM_STRIPS + 1] = "0000";
@@ -60,8 +61,6 @@ void loop() {
 }
 
 void procesarComando(String cmd) {
-  // Formato esperado: L + carril (0-3) + 18 caracteres de color
-  // 0 = apagado, 1 = celeste (nota), 2 = violeta (cola), 3 = verde (golpe)
   if (cmd.length() < 1 + 1 + LEDS_POR_TIRA) return;
   if (cmd[0] != 'L') return;
 
@@ -70,16 +69,16 @@ void procesarComando(String cmd) {
 
   for (int i = 0; i < LEDS_POR_TIRA; i++) {
     char estado = cmd[2 + i];
-    if (estado == '1') {
-      tiras[carril].setPixelColor(i, COLOR_NOTA);      // Celeste
-    } else if (estado == '2') {
-      // Un violeta lindo para la cola
-      tiras[carril].setPixelColor(i, Adafruit_NeoPixel::Color(150, 0, 255));
-    } else if (estado == '3') {
-      tiras[carril].setPixelColor(i, COLOR_GOLPE);     // Verde
-    } else {
-      tiras[carril].setPixelColor(i, COLOR_APAGADO);   // Apagado
-    }
+    uint32_t color = Adafruit_NeoPixel::Color(0, 0, 0); // Apagado por defecto
+    
+    if (estado == '1') color = COLOR_NOTA;      // Celeste (Nota)
+    else if (estado == '2') color = Adafruit_NeoPixel::Color(150, 0, 255); // Violeta (Cola)
+    else if (estado == '3') color = COLOR_GOLPE;     // Verde (Zona de golpe)
+    else if (estado == '4') color = Adafruit_NeoPixel::Color(255, 0, 0);   // Rojo (Apretado)
+    else if (estado == '5') color = Adafruit_NeoPixel::Color(255, 255, 0); // Amarillo (Transición)
+    else if (estado == '6') color = Adafruit_NeoPixel::Color(255, 100, 0); // Naranja (Transición)
+
+    tiras[carril].setPixelColor(i, color); 
   }
   tiras[carril].show();
-}
+} 
